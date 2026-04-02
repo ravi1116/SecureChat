@@ -8,7 +8,7 @@ Encryption is client-side: each room uses a shared secret + room salt.
 
 import os, sqlite3, hashlib, secrets, base64
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 app = Flask(__name__)
@@ -17,6 +17,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 DB_PATH = "chat.db"
 SESSION_TTL = timedelta(hours=1)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 # -- DB --
 
@@ -56,6 +57,23 @@ def init_db():
             aes_key_b64 TEXT NOT NULL,
             created     TEXT NOT NULL,
             salt_b64    TEXT
+        );
+        CREATE TABLE IF NOT EXISTS usage (
+            username    TEXT PRIMARY KEY,
+            char_used   INTEGER NOT NULL DEFAULT 0,
+            updated     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS premium_users (
+            username    TEXT PRIMARY KEY,
+            plan        TEXT NOT NULL DEFAULT 'premium',
+            is_active   INTEGER NOT NULL DEFAULT 1,
+            created     TEXT NOT NULL,
+            updated     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS admin_attempts (
+            ip            TEXT PRIMARY KEY,
+            fail_count    INTEGER NOT NULL DEFAULT 0,
+            blocked_until TEXT
         );
         CREATE TABLE IF NOT EXISTS messages (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +126,14 @@ def verify_token(token: str):
         return None
     return dict(row)
 
+def is_premium(username: str) -> bool:
+    con = get_db()
+    row = con.execute(
+        "SELECT is_active FROM premium_users WHERE username=?", (username,)
+    ).fetchone()
+    con.close()
+    return bool(row and row["is_active"])
+
 def issue_unused_key(username: str):
     con = get_db()
     row = con.execute(
@@ -138,6 +164,8 @@ def auth_login():
         return jsonify({"ok": False, "error": "Key and username required"}), 400
     if len(username) > 24:
         return jsonify({"ok": False, "error": "Username too long"}), 400
+    if not username.lower().endswith("@gmail.com"):
+        return jsonify({"ok": False, "error": "Gmail required"}), 400
 
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     con = get_db()
@@ -182,6 +210,8 @@ def auth_request_key():
         return jsonify({"ok": False, "error": "Username required"}), 400
     if len(username) > 24:
         return jsonify({"ok": False, "error": "Username too long"}), 400
+    if not username.lower().endswith("@gmail.com"):
+        return jsonify({"ok": False, "error": "Gmail required"}), 400
     key = issue_unused_key(username)
     if not key:
         return jsonify({"ok": False, "error": "No unused keys available"}), 409
@@ -202,6 +232,105 @@ def auth_status():
     token = request.headers.get("X-Session-Token", "")
     sess  = verify_token(token)
     return jsonify({"authenticated": bool(sess)})
+
+# -- Admin --
+
+def require_admin():
+    return bool(session.get("is_admin"))
+
+def client_ip():
+    xf = request.headers.get("X-Forwarded-For", "")
+    if xf:
+        return xf.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+@app.route("/admin")
+def admin_page():
+    if not require_admin():
+        return render_template("admin_login.html")
+    return render_template("admin.html")
+
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    data = request.get_json() or {}
+    pw = (data.get("password") or "").strip()
+    if not ADMIN_PASSWORD:
+        return jsonify({"ok": False, "error": "Admin password not set"}), 500
+
+    ip = client_ip()
+    now = datetime.now()
+    con = get_db()
+    row = con.execute(
+        "SELECT fail_count, blocked_until FROM admin_attempts WHERE ip=?", (ip,)
+    ).fetchone()
+    if row and row["blocked_until"]:
+        try:
+            if datetime.fromisoformat(row["blocked_until"]) > now:
+                con.close()
+                return jsonify({"ok": False, "error": "Too many attempts. IP blocked."}), 429
+        except Exception:
+            pass
+
+    if pw != ADMIN_PASSWORD:
+        fail_count = (row["fail_count"] if row else 0) + 1
+        blocked_until = None
+        if fail_count >= 5:
+            blocked_until = (now + timedelta(minutes=15)).isoformat()
+            fail_count = 0
+        con.execute(
+            "INSERT INTO admin_attempts (ip, fail_count, blocked_until) VALUES (?,?,?) "
+            "ON CONFLICT(ip) DO UPDATE SET fail_count=?, blocked_until=?",
+            (ip, fail_count, blocked_until, fail_count, blocked_until)
+        )
+        con.commit()
+        con.close()
+        return jsonify({"ok": False, "error": "Invalid password"}), 401
+
+    # Success: clear attempts
+    con.execute("DELETE FROM admin_attempts WHERE ip=?", (ip,))
+    con.commit()
+    con.close()
+    session["is_admin"] = True
+    return jsonify({"ok": True})
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+@app.route("/admin/data")
+def admin_data():
+    if not require_admin():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    con = get_db()
+    usage = con.execute("SELECT username, char_used FROM usage ORDER BY char_used DESC").fetchall()
+    premium = con.execute("SELECT username, is_active, plan, updated FROM premium_users").fetchall()
+    con.close()
+    return jsonify({
+        "usage": [dict(r) for r in usage],
+        "premium": [dict(r) for r in premium]
+    })
+
+@app.route("/admin/premium", methods=["POST"])
+def admin_set_premium():
+    if not require_admin():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip().lower()
+    active = 1 if data.get("is_active") else 0
+    if not username:
+        return jsonify({"ok": False, "error": "Username required"}), 400
+    now = datetime.now().isoformat()
+    con = get_db()
+    con.execute(
+        "INSERT INTO premium_users (username, plan, is_active, created, updated) "
+        "VALUES (?,?,?, ?, ?) "
+        "ON CONFLICT(username) DO UPDATE SET is_active=?, updated=?",
+        (username, "premium", active, now, now, active, now)
+    )
+    con.commit()
+    con.close()
+    return jsonify({"ok": True})
 
 # -- Rooms --
 
@@ -303,8 +432,21 @@ def on_message(data):
     room       = data.get("room", "general")
     ciphertext = data.get("ciphertext", "")
     nonce      = data.get("nonce", "")
+    char_len   = int(data.get("char_len", 0) or 0)
     if not ciphertext or not nonce:
         return
+
+    # Enforce 2400 total characters per user (best-effort, client-reported length)
+    if not is_premium(sess["username"]):
+        con = get_db()
+        row = con.execute(
+            "SELECT char_used FROM usage WHERE username=?", (sess["username"],)
+        ).fetchone()
+        used = row["char_used"] if row else 0
+        if used + char_len > 2400:
+            con.close()
+            emit("error", {"message": "Character limit reached (2400)."})
+            return
 
     now = datetime.now().isoformat()
     con = get_db()
@@ -312,6 +454,12 @@ def on_message(data):
         "INSERT INTO messages (room, sender, ciphertext, nonce, created) VALUES (?,?,?,?,?)",
         (room, sess["username"], ciphertext, nonce, now)
     )
+    if not is_premium(sess["username"]):
+        con.execute(
+            "INSERT INTO usage (username, char_used, updated) VALUES (?,?,?) "
+            "ON CONFLICT(username) DO UPDATE SET char_used=char_used+?, updated=?",
+            (sess["username"], used + char_len, now, char_len, now)
+        )
     con.commit()
     con.close()
 
