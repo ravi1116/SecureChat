@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureChat - ESP32 Encrypted</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:    #07080a;
+  --bg2:   #0d0f12;
+  --bg3:   #13161b;
+  --bd:    #1c2028;
+  --green: #00e676;
+  --blue:  #40c4ff;
+  --amber: #ffab40;
+  --red:   #ef5350;
+  --dim:   #3a4050;
+  --text:  #b8bdc8;
+  --mono:  'Share Tech Mono', monospace;
+  --sans:  'Syne', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+
+/* -- Login screen -- */
+#login-screen {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+.login-box {
+  width: 380px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: var(--bg2);
+  overflow: hidden;
+}
+.login-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--bd);
+}
+.login-logo {
+  font-family: var(--sans);
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+.login-logo span { color: var(--green); }
+.login-sub { font-size: 11px; color: var(--dim); margin-top: 4px; }
+.login-body { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+.field label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.field input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color .15s;
+}
+.field input:focus { border-color: var(--green); color: #fff; }
+.key-field input { letter-spacing: .15em; color: var(--green); }
+.btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+  letter-spacing: .04em;
+}
+.btn:active { opacity: .8; }
+.btn-green { background: var(--green); color: #000; }
+.login-error {
+  font-size: 12px;
+  color: var(--red);
+  text-align: center;
+  min-height: 16px;
+}
+
+/* -- App layout -- */
+#app { display: none; height: 100vh; }
+#app.active { display: flex; }
+
+/* Sidebar */
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--bg2);
+  border-right: 1px solid var(--bd);
+  display: flex;
+  flex-direction: column;
+}
+.sidebar-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sidebar-logo {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.sidebar-logo span { color: var(--green); }
+.user-badge {
+  font-size: 11px;
+  color: var(--green);
+  background: rgba(0,230,118,.08);
+  border: 1px solid rgba(0,230,118,.2);
+  border-radius: 20px;
+  padding: 2px 8px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rooms-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--dim);
+  padding: 12px 16px 6px;
+}
+.room-list { flex: 1; overflow-y: auto; }
+.room-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--dim);
+  transition: color .1s, background .1s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.room-item:hover { color: var(--text); background: rgba(255,255,255,.03); }
+.room-item.active { color: var(--green); background: rgba(0,230,118,.06); }
+.room-item::before { content: '#'; font-size: 14px; }
+.room-item .unread {
+  margin-left: auto;
+  background: var(--green);
+  color: #000;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  display: none;
+}
+.room-item .unread.show { display: block; }
+.new-room-row {
+  padding: 10px 16px;
+  border-top: 1px solid var(--bd);
+  display: flex;
+  gap: 6px;
+}
+.new-room-row input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+}
+.new-room-row input:focus { border-color: var(--green); }
+.new-room-btn {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.logout-btn {
+  margin: 10px 16px;
+  padding: 7px;
+  background: transparent;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.logout-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* Chat area */
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--bd);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.chat-room-name {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+}
+.chat-room-name::before { content: '# '; color: var(--dim); }
+.enc-badge {
+  font-size: 11px;
+  color: var(--blue);
+  background: rgba(64,196,255,.08);
+  border: 1px solid rgba(64,196,255,.2);
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+.room-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.secret-input {
+  width: 180px;
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+}
+.secret-input:focus { border-color: var(--green); color: #fff; }
+.secret-btn {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bd) transparent;
+}
+.msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 72%;
+  animation: msgIn .15s ease;
+}
+@keyframes msgIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+.msg.mine { align-self: flex-end; align-items: flex-end; }
+.msg.theirs { align-self: flex-start; align-items: flex-start; }
+.msg-meta {
+  font-size: 10px;
+  color: var(--dim);
+  margin-bottom: 3px;
+  padding: 0 4px;
+}
+.msg-bubble {
+  padding: 8px 12px;
+  border-radius: 10px;
+  line-height: 1.5;
+  word-break: break-word;
+  font-size: 13px;
+}
+.msg.mine  .msg-bubble { background: rgba(0,230,118,.12); color: #e8f5e9; border: 1px solid rgba(0,230,118,.2); border-bottom-right-radius: 3px; }
+.msg.theirs .msg-bubble { background: var(--bg3); color: var(--text); border: 1px solid var(--bd); border-bottom-left-radius: 3px; }
+.msg-system {
+  align-self: center;
+  font-size: 11px;
+  color: var(--dim);
+  padding: 4px 0;
+  font-style: italic;
+}
+.msg-enc {
+  font-size: 10px;
+  margin-top: 3px;
+  padding: 0 4px;
+  color: var(--dim);
+  font-family: var(--mono);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-bar {
+  padding: 12px 20px;
+  border-top: 1px solid var(--bd);
+  background: var(--bg2);
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+#msg-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 14px;
+  outline: none;
+  resize: none;
+  max-height: 120px;
+  line-height: 1.5;
+  transition: border-color .15s;
+}
+#msg-input:focus { border-color: var(--green); }
+.send-btn {
+  background: var(--green);
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 18px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.send-btn:hover { opacity: .9; }
+
+/* Toasts */
+.toast-wrap {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+}
+.toast {
+  min-width: 220px;
+  max-width: 320px;
+  background: #0e1014;
+  border: 1px solid var(--bd);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.35);
+  font-family: var(--mono);
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(-6px);
+  animation: toastIn .18s ease forwards;
+}
+.toast.success { border-color: rgba(0,230,118,.35); color: #e8f5e9; }
+.toast.warn { border-color: rgba(255,171,64,.45); color: #ffe0b2; }
+.toast.error { border-color: rgba(239,83,80,.45); color: #ffcdd2; }
+@keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-header">
+      <div class="login-logo">Secure<span>Chat</span></div>
+      <div class="login-sub">ESP32-CAM hardware key authentication</div>
+    </div>
+    <div class="login-body">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="login-username" placeholder="your name" maxlength="24" autocomplete="off"
+               onkeydown="if(event.key==='Enter') doLogin()">
+      </div>
+      <div class="field key-field">
+        <label>16-character hardware key</label>
+        <input type="text" id="login-key" placeholder="xxxxxxxxxxxxxxxx" maxlength="16"
+               oninput="this.value=this.value.replace(/[^a-zA-Z0-9]/g,'')"
+               onkeydown="if(event.key==='Enter') doLogin()">
+      </div>
+      <button class="btn" style="background:#0e1014;color:var(--green);border:1px solid var(--bd);" onclick="requestKey()">Get Unused Key</button>
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-green" onclick="doLogin()">Authenticate</button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">Secure<span>Chat</span></div>
+      <div class="user-badge" id="username-badge"></div>
+    </div>
+    <div class="rooms-label">Rooms</div>
+    <div class="room-list" id="room-list"></div>
+    <div class="new-room-row">
+      <input type="text" id="new-room-input" placeholder="new room..." maxlength="32"
+             onkeydown="if(event.key==='Enter') createRoom()">
+      <button class="new-room-btn" onclick="createRoom()">+</button>
+    </div>
+    <button class="logout-btn" onclick="doLogout()">Logout</button>
+  </div>
+
+  <div class="chat-area">
+    <div class="chat-header">
+      <div class="chat-room-name" id="chat-room-label">general</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="room-secret">
+          <input class="secret-input" id="room-secret-input" placeholder="room secret..."
+                 autocomplete="off"
+                 onkeydown="if(event.key==='Enter') saveRoomSecret()"
+                 onblur="saveRoomSecret()">
+          <button class="secret-btn" onclick="saveRoomSecret()">Set</button>
+          <button class="secret-btn" onclick="copyRoomSecret()">Copy</button>
+          <button class="secret-btn" onclick="genRoomSecret()">Generate</button>
+        </div>
+        <div class="enc-badge">AES-256-GCM encrypted</div>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-bar">
+      <textarea id="msg-input" rows="1" placeholder="Type a message..."
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
+        oninput="autoResize(this)"></textarea>
+      <button class="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+// -- State --
+let token    = localStorage.getItem('sc_token')    || '';
+let username = localStorage.getItem('sc_username') || '';
+let loginKey = sessionStorage.getItem('sc_key')    || '';
+let roomKeys = {}; // Stores derived CryptoKey per room
+let roomSecrets = JSON.parse(localStorage.getItem('sc_room_secrets') || '{}');
+let roomSalts = {};
+let currentRoom = 'general';
+let socket;
+let unread = {};
+
+function showToast(msg, type='success') {
+  const wrap = document.getElementById('toast-wrap');
+  if (!wrap) return;
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  wrap.appendChild(t);
+  setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateY(-6px)';
+    t.style.transition = 'opacity .2s ease, transform .2s ease';
+    setTimeout(() => t.remove(), 220);
+  }, 2200);
+}
+
+// -- AES-256-GCM via WebCrypto --
+
+async function deriveRoomKey(sharedSecret, saltB64) {
+  if (!sharedSecret) throw new Error("Missing room secret");
+  const salt = Uint8Array.from(atob(saltB64), c => c.charCodeAt(0));
+  const enc  = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(sharedSecret),
+    {name:'PBKDF2'},
+    false,
+    ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt, iterations: 200000, hash: 'SHA-256'},
+    keyMaterial,
+    {name:'AES-GCM', length: 256},
+    false,
+    ['encrypt','decrypt']
+  );
+}
+
+async function encryptMsg(text, cryptoKey) {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const enc   = new TextEncoder();
+  const ct    = await crypto.subtle.encrypt({name:'AES-GCM', iv:nonce}, cryptoKey, enc.encode(text));
+  return {
+    ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+    nonce:      btoa(String.fromCharCode(...nonce))
+  };
+}
+
+async function decryptMsg(ciphertextB64, nonceB64, cryptoKey) {
+  try {
+    const ct    = Uint8Array.from(atob(ciphertextB64), c => c.charCodeAt(0));
+    const nonce = Uint8Array.from(atob(nonceB64),      c => c.charCodeAt(0));
+    const pt    = await crypto.subtle.decrypt({name:'AES-GCM', iv:nonce}, cryptoKey, ct);
+    return new TextDecoder().decode(pt);
+  } catch {
+    return '[unable to decrypt]';
+  }
+}
+
+// -- Login / Logout --
+
+async function doLogin() {
+  const key  = document.getElementById('login-key').value.trim();
+  const user = document.getElementById('login-username').value.trim();
+  const err  = document.getElementById('login-error');
+
+  if (!user) { err.textContent = 'Enter a username'; showToast('Enter a username', 'warn'); return; }
+  if (key.length !== 16) { err.textContent = 'Key must be 16 characters'; showToast('Key must be 16 characters', 'warn'); return; }
+
+  err.textContent = '';
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({key, username: user})
+    });
+    const d = await r.json();
+    if (!d.ok) { err.textContent = d.error; showToast(d.error || 'Login failed', 'error'); return; }
+
+    token     = d.token;
+    username  = d.username;
+    loginKey  = key;
+    
+    localStorage.setItem('sc_token',    token);
+    localStorage.setItem('sc_username', username);
+    sessionStorage.setItem('sc_key',    loginKey);
+
+    showToast('Authenticated', 'success');
+    launchApp();
+  } catch {
+    err.textContent = 'Server unreachable';
+    showToast('Server unreachable', 'error');
+  }
+}
+
+async function requestKey() {
+  const user = document.getElementById('login-username').value.trim();
+  const err  = document.getElementById('login-error');
+  if (!user) { err.textContent = 'Enter a username first'; showToast('Enter a username first', 'warn'); return; }
+  err.textContent = '';
+  try {
+    const r = await fetch('/auth/request_key', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: user})
+    });
+    const d = await r.json();
+    if (!d.ok) { err.textContent = d.error; showToast(d.error || 'No unused keys', 'warn'); return; }
+    document.getElementById('login-key').value = d.key;
+    showToast('Unused key issued', 'success');
+  } catch {
+    err.textContent = 'Server unreachable';
+    showToast('Server unreachable', 'error');
+  }
+}
+
+async function doLogout() {
+  await fetch('/auth/logout', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({token})
+  });
+  localStorage.clear();
+  sessionStorage.clear();
+  showToast('Logged out', 'success');
+  location.reload();
+}
+
+// -- App init --
+
+async function launchApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').classList.add('active');
+  document.getElementById('username-badge').textContent = username;
+
+  await loadRooms();
+  connectSocket();
+  joinRoom('general');
+}
+
+// -- Rooms --
+
+async function loadRooms() {
+  const r = await fetch('/rooms', {headers: {'X-Session-Token': token}});
+  const d = await r.json();
+  renderRooms(d.rooms);
+}
+
+function renderRooms(rooms) {
+  const list = document.getElementById('room-list');
+  list.innerHTML = '';
+  (rooms || []).forEach(name => {
+    const el = document.createElement('div');
+    el.className = 'room-item' + (name === currentRoom ? ' active' : '');
+    el.dataset.room = name;
+    el.innerHTML = `${name}<span class="unread ${(unread[name]||0)>0?'show':''}" id="unread-${name}">${unread[name]||''}</span>`;
+    el.onclick = () => joinRoom(name);
+    list.appendChild(el);
+  });
+}
+
+async function createRoom() {
+  const inp  = document.getElementById('new-room-input');
+  const name = inp.value.trim().toLowerCase().replace(/\s+/g,'-');
+  if (!name) return;
+  await fetch('/rooms', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','X-Session-Token':token},
+    body: JSON.stringify({name})
+  });
+  inp.value = '';
+}
+
+async function joinRoom(name) {
+  if (currentRoom && socket) socket.emit('leave', {token, room: currentRoom});
+  currentRoom = name;
+  document.getElementById('chat-room-label').textContent = name;
+  document.getElementById('messages').innerHTML = '';
+  unread[name] = 0;
+
+  document.querySelectorAll('.room-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.room === name);
+    if (el.dataset.room === name) {
+      const badge = el.querySelector('.unread');
+      if (badge) { badge.classList.remove('show'); badge.textContent = ''; }
+    }
+  });
+
+  syncRoomSecretUI(name);
+  try {
+    const r = await fetch(`/rooms/${name}/salt`, {headers:{'X-Session-Token':token}});
+    const d = await r.json();
+    if (d.ok) {
+      roomSalts[name] = d.salt;
+      if (roomSecrets[name]) {
+        roomKeys[name] = await deriveRoomKey(roomSecrets[name], d.salt);
+      }
+    }
+  } catch(err) {
+    console.error("Failed to fetch key for room:", name);
+  }
+
+  if (socket) socket.emit('join', {token, room: name});
+  await loadHistory(name);
+}
+
+// -- History --
+
+async function loadHistory(room) {
+  const r = await fetch(`/messages/${room}`, {headers:{'X-Session-Token':token}});
+  const d = await r.json();
+  
+  if (!roomKeys[room]) return; 
+  
+  const cryptoKey = roomKeys[room];
+  for (const msg of (d.messages || [])) {
+    const text = await decryptMsg(msg.ciphertext, msg.nonce, cryptoKey);
+    appendMessage(msg.sender, text, msg.ciphertext, msg.created, false);
+  }
+  scrollBottom();
+}
+
+// -- Socket --
+
+function connectSocket() {
+  socket = io();
+
+  socket.on('message', async data => {
+    if (data.room !== currentRoom) {
+      unread[data.room] = (unread[data.room] || 0) + 1;
+      const badge = document.querySelector(`[data-room="${data.room}"] .unread`);
+      if (badge) { badge.textContent = unread[data.room]; badge.classList.add('show'); }
+      return;
+    }
+    
+    if (!roomKeys[data.room]) return;
+    
+    const cryptoKey = roomKeys[data.room];
+    const text = await decryptMsg(data.ciphertext, data.nonce, cryptoKey);
+    appendMessage(data.sender, text, data.ciphertext, data.created, true);
+  });
+
+  socket.on('system', data => {
+    if (data.room !== currentRoom) return;
+    const el = document.createElement('div');
+    el.className = 'msg-system';
+    el.textContent = data.message;
+    document.getElementById('messages').appendChild(el);
+    scrollBottom();
+  });
+
+  socket.on('room_created', async () => { await loadRooms(); });
+}
+
+// -- Send --
+
+async function sendMessage() {
+  const inp  = document.getElementById('msg-input');
+  const text = inp.value.trim();
+  if (!text) return;
+  
+  if (!roomKeys[currentRoom]) {
+      showToast("Room secret not set. Set it in the header.", 'warn');
+      return;
+  }
+
+  const cryptoKey = roomKeys[currentRoom];
+  const {ciphertext, nonce} = await encryptMsg(text, cryptoKey);
+
+  socket.emit('message', {token, room: currentRoom, ciphertext, nonce});
+  inp.value = '';
+  
+  inp.style.height = 'auto'; 
+}
+
+// -- Render message --
+
+function appendMessage(sender, text, ciphertext, created, animate) {
+  const isMine = sender === username;
+  const time   = created ? created.slice(11, 16) : '';
+  const el     = document.createElement('div');
+  el.className = `msg ${isMine ? 'mine' : 'theirs'}`;
+  el.innerHTML = `
+    <div class="msg-meta">${isMine ? '' : sender + ' - '}${time}</div>
+    <div class="msg-bubble">${escHtml(text)}</div>
+    <div class="msg-enc" title="${ciphertext}">enc: ${ciphertext.slice(0,28)}...</div>
+  `;
+  document.getElementById('messages').appendChild(el);
+  if (animate) scrollBottom();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+}
+
+function scrollBottom() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// -- Room secret helpers --
+
+function syncRoomSecretUI(room) {
+  const input = document.getElementById('room-secret-input');
+  if (!input) return;
+  input.value = roomSecrets[room] || '';
+}
+
+async function refreshRoomKey(room) {
+  if (!roomSecrets[room]) { roomKeys[room] = null; return; }
+  const salt = roomSalts[room];
+  if (salt) {
+    roomKeys[room] = await deriveRoomKey(roomSecrets[room], salt);
+    return;
+  }
+  try {
+    const r = await fetch(`/rooms/${room}/salt`, {headers:{'X-Session-Token':token}});
+    const d = await r.json();
+    if (d.ok) {
+      roomSalts[room] = d.salt;
+      roomKeys[room] = await deriveRoomKey(roomSecrets[room], d.salt);
+    }
+  } catch(err) {
+    console.error("Failed to refresh key for room:", room);
+  }
+}
+
+function saveRoomSecret() {
+  const input = document.getElementById('room-secret-input');
+  const secret = (input.value || '').trim();
+  if (!secret) { showToast('Enter a room secret', 'warn'); return; }
+  roomSecrets[currentRoom] = secret;
+  localStorage.setItem('sc_room_secrets', JSON.stringify(roomSecrets));
+  refreshRoomKey(currentRoom);
+  showToast('Room secret set', 'success');
+}
+
+function copyRoomSecret() {
+  const secret = roomSecrets[currentRoom] || '';
+  if (!secret) { showToast('No secret to copy', 'warn'); return; }
+  navigator.clipboard.writeText(secret).then(
+    () => showToast('Secret copied', 'success'),
+    () => showToast('Copy failed', 'error')
+  );
+}
+
+function genRoomSecret() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 20; i++) out += chars[Math.floor(Math.random()*chars.length)];
+  const input = document.getElementById('room-secret-input');
+  input.value = out;
+  saveRoomSecret();
+  showToast('Secret generated', 'success');
+}
+
+// -- Auto-login if token stored --
+
+(async () => {
+  if (token && username) {
+    const r = await fetch('/auth/status', {headers:{'X-Session-Token':token}}).catch(()=>null);
+    if (r && r.ok) {
+      const d = await r.json();
+      if (d.authenticated && loginKey) { launchApp(); return; }
+    }
+    localStorage.clear();
+  }
+})();
+</script>
+</body>
+</html>

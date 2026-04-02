@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: securechat
+    env: python
+    plan: free
+    buildCommand: pip install -r chat_requirements.txt
+    startCommand: python chat_server.py
+    healthCheckPath: /healthz
+    autoDeploy: true
