@@ -17,3 +17,27 @@ Open `http://localhost:5000`.
 ## Health Check
 
 `/healthz` returns `{ "ok": true }`.
+
+
+
+CAMERA
+|
+FRAME TO KEY GENERATOR
+|
+FETCHING
+|
+BLOCK
+|
+(FRAME → HASHING KEY)
+|
+ESP32
+|
+HOSTING
+|
+INTERNET
+|
+KEY APPLICATION
+|
+(E2E MESSAGING SYSTEM)
+|
+KEY STORAGE (LOCAL DB)
